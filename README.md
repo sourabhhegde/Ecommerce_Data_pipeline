@@ -1,13 +1,13 @@
 # 🛒 Olist E-Commerce Streaming Data Pipeline
 
-A real-time streaming pipeline that **generates synthetic e-commerce events** (orders, payments, clicks) and processes them through a Medallion Architecture (Bronze → Silver → Gold).
+A real-time streaming pipeline that **generates synthetic e-commerce events** (orders, payments, clicks) and processes them through a Medallion Architecture (Bronze → Silver → Gold) — fully containerized with Docker.
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                   Python Producer (Faker)                        │
-│     1,000 customers · 200 products · 50 sellers                 │
+│              Python Producer (Faker) [Docker]                    │
+│        1,000 customers · 200 products · 50 sellers               │
 └────────────────────────┬────────────────────────────────────────┘
                          │  JSON events @ configurable rate
                          ▼
@@ -17,7 +17,7 @@ A real-time streaming pipeline that **generates synthetic e-commerce events** (o
                          │
                          ▼
               ┌─────────────────────┐
-              │   Python Consumer   │
+              │  Python Consumer    │  [Docker]
               └──────┬──────┬───────┘
                      │      │
            ┌─────────┘      └─────────┐
@@ -29,11 +29,17 @@ A real-time streaming pipeline that **generates synthetic e-commerce events** (o
   │ Hive-partition │        └────────┬─────────┘
   └────────────────┘                 │
                                      ▼
-                              ┌─────────────┐
-                              │     dbt     │
-                              │  staging/   │  ← views (cleaned)
-                              │  marts/     │  ← tables (aggregated)
-                              └─────────────┘
+                              ┌─────────────────┐
+                              │  dbt Runner     │  [Docker — runs every 60s]
+                              │  staging/       │  ← views (cleaned)
+                              │  marts/         │  ← tables (aggregated)
+                              └────────┬────────┘
+                                       │
+                                       ▼
+                              ┌─────────────────┐
+                              │    Metabase      │  [Docker — Live Dashboard]
+                              │  localhost:3000  │
+                              └─────────────────┘
 ```
 
 ## 📦 Stack
@@ -45,40 +51,82 @@ A real-time streaming pipeline that **generates synthetic e-commerce events** (o
 | Data Lake | **MinIO** (S3-compatible) | 9000 / **9001** |
 | Data Warehouse | **PostgreSQL 15** | 5432 |
 | Transformations | **dbt-core** + dbt-postgres | — |
+| Dashboard | **Metabase** | **3000** |
+| Producer | **Python + Faker** | Docker |
+| Consumer | **Python + confluent-kafka** | Docker |
 
-## 🚀 Quick Start
+---
 
-### 1. Start Infrastructure
+## 🚀 Getting Started (Clone & Run)
+
+### Prerequisites
+Make sure you have these installed on your machine:
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
+- [Python 3.11+](https://www.python.org/downloads/)
+- [Git](https://git-scm.com/)
+
+### Step 1: Clone the Repository
 ```bash
-docker-compose up -d
+git clone https://github.com/YOUR_USERNAME/olist-data-pipeline.git
+cd olist-data-pipeline
 ```
 
-### 2. Install Python Dependencies
+### Step 2: Configure Environment Variables
+```bash
+# On Mac / Linux
+cp .env.example .env
+
+# On Windows (PowerShell)
+copy .env.example .env
+```
+> The default values in `.env` work out of the box. No changes needed for local development.
+
+### Step 3: Start the Entire Pipeline (One Command!)
+```bash
+docker-compose up -d --build
+```
+This single command will:
+- ✅ Download all Docker images
+- ✅ Build the Python Producer and Consumer containers
+- ✅ Start Redpanda, MinIO, PostgreSQL, and Metabase
+- ✅ Automatically start streaming events (Producer)
+- ✅ Automatically save data to MinIO and PostgreSQL (Consumer)
+- ✅ Automatically run `dbt` every 60 seconds (dbt Runner)
+
+> ⏳ **Wait ~60 seconds** for all services to fully initialize before proceeding.
+
+### Step 4: Bootstrap Infrastructure (One-Time Setup)
+This script creates the MinIO buckets, Kafka topics, and PostgreSQL schemas:
 ```bash
 pip install -r requirements.txt
-```
-
-### 3. Setup Buckets, Topics & DB Schemas
-```bash
 python scripts/setup_infra.py
 ```
 
-### 4. Start Streaming (two terminals)
-```bash
-# Terminal 1 — produce events
-python scripts/producer.py
+### Step 5: Open Your Dashboards 🎉
+| UI | URL | Login |
+|---|---|---|
+| **Metabase** (Live Dashboard) | http://localhost:3000 | Set up on first visit |
+| **Redpanda Console** (Kafka UI) | http://localhost:8080 | None |
+| **MinIO Console** (Data Lake) | http://localhost:9001 | `minioadmin` / `minioadmin` |
 
-# Terminal 2 — consume → MinIO + PostgreSQL
-python scripts/consumer.py
-```
+### Step 6: Connect Metabase to PostgreSQL
+On first launch of Metabase (http://localhost:3000):
+1. Create an admin account.
+2. When asked to "Add your data", select **PostgreSQL**.
+3. Fill in:
+   - **Host:** `postgres`
+   - **Port:** `5432`
+   - **Database:** `olist_warehouse`
+   - **Username:** `postgres`
+   - **Password:** `postgrespassword`
 
-### 5. Run dbt Transformations
+---
+
+## 🛑 Stopping the Pipeline
 ```bash
-cd dbt_project
-dbt run          # build staging views + mart tables
-dbt test         # run data quality checks
-dbt docs generate && dbt docs serve   # browse lineage
+docker-compose down
 ```
+> Your data is **safely persisted** in Docker named volumes (`postgres_data`, `minio_data`). Running `docker-compose up -d` again will restore everything exactly where you left off.
 
 ---
 
@@ -86,6 +134,7 @@ dbt docs generate && dbt docs serve   # browse lineage
 
 | UI | URL | Credentials |
 |---|---|---|
+| Metabase Dashboard | http://localhost:3000 | *(created on first visit)* |
 | Redpanda Console | http://localhost:8080 | *(none)* |
 | MinIO Console | http://localhost:9001 | `minioadmin` / `minioadmin` |
 
@@ -120,13 +169,7 @@ raw.clicks   ──► stg_clicks   ──► dim_products        (sales + engag
 
 ## ⚙️ Configuration
 
-Copy `.env.example` to `.env` and adjust:
-
-```bash
-cp .env.example .env
-```
-
-Key settings:
+Copy `.env.example` to `.env` and adjust as needed:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -140,13 +183,16 @@ Key settings:
 
 ```
 olist_data_pipeline/
-├── docker-compose.yml          # Redpanda, MinIO, PostgreSQL
+├── docker-compose.yml          # All 8 services: Redpanda, MinIO, PostgreSQL,
+│                               # Metabase, Producer, Consumer, dbt Runner, Console
+├── Dockerfile.producer         # Docker image for the event generator
+├── Dockerfile.consumer         # Docker image for the Kafka consumer
 ├── requirements.txt
-├── .env.example
+├── .env.example                # Config template (copy to .env)
 ├── scripts/
 │   ├── setup_infra.py          # One-time: create buckets, topics, DB schema
-│   ├── producer.py             # Fake event generator
-│   └── consumer.py             # Kafka → MinIO + PostgreSQL
+│   ├── producer.py             # Fake event generator (Faker pt_BR)
+│   └── consumer.py             # Kafka → MinIO + PostgreSQL dual-sink
 └── dbt_project/
     ├── dbt_project.yml
     ├── profiles.yml
