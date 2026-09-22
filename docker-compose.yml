@@ -1,0 +1,193 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 1. Redpanda: Kafka-Compatible Streaming Broker
+  # ---------------------------------------------------------------------------
+  redpanda:
+    image: redpandadata/redpanda:v23.2.8
+    container_name: olist_redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+      - --schema-registry-addr 0.0.0.0:8081
+    ports:
+      - "9092:9092"     # Kafka API (host access)
+      - "29092:29092"   # Kafka API (container-to-container)
+      - "8082:8082"     # Pandaproxy HTTP REST
+      - "8081:8081"     # Schema Registry
+      - "9644:9644"     # Admin API
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 2. Redpanda Console: Web UI for Topics & Message Inspection
+  # ---------------------------------------------------------------------------
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.3.1
+    container_name: olist_redpanda_console
+    entrypoint: /bin/sh
+    command: -c 'echo "$$CONSOLE_CONFIG_FILE" > /tmp/config.yml && /app/console'
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["redpanda:29092"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://redpanda:9644"]
+    ports:
+      - "8080:8080"     # Console Web UI
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 3. MinIO: S3-Compatible Object Storage (Data Lake — Bronze Layer)
+  # ---------------------------------------------------------------------------
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: olist_minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 4. PostgreSQL: Relational Data Warehouse (Serving — Gold Layer)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: olist_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: olist_warehouse
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 5. Metabase: Business Intelligence Dashboard
+  # ---------------------------------------------------------------------------
+  metabase:
+    image: metabase/metabase:latest
+    container_name: olist_metabase
+    ports:
+      - "3000:3000"
+    volumes:
+      - metabase_data:/metabase-data
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 6. Python Producer (Data Generation)
+  # ---------------------------------------------------------------------------
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    container_name: olist_producer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:29092
+      - EVENTS_PER_SECOND=10
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 7. Python Consumer (MinIO & Postgres Sink)
+  # ---------------------------------------------------------------------------
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: olist_consumer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:29092
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_DB=olist_warehouse
+      - PG_USER=postgres
+      - PG_PASSWORD=postgrespassword
+      - BATCH_SIZE=100
+      - FLUSH_INTERVAL=30
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 8. dbt Automator (Micro-batch Transformation)
+  # ---------------------------------------------------------------------------
+  dbt_runner:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.7.latest
+    container_name: olist_dbt
+    entrypoint: ""
+    volumes:
+      - ./dbt_project:/usr/app
+    environment:
+      - PG_HOST=postgres
+    working_dir: /usr/app
+    command: >
+      sh -c "
+      echo 'Starting dbt automation...' &&
+      while true; do
+        echo 'Running dbt...' &&
+        dbt run --profiles-dir . &&
+        echo 'Sleeping for 60s...' &&
+        sleep 60;
+      done"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+# -----------------------------------------------------------------------------
+# Persistent Named Volumes
+# -----------------------------------------------------------------------------
+volumes:
+  minio_data:
+  postgres_data:
+  metabase_data:

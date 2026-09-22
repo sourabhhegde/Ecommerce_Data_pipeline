@@ -1,0 +1,24 @@
+# Kafka / Redpanda client
+confluent-kafka==2.3.0
+
+# Fake data generation
+faker==20.1.0
+
+# Parquet + columnar storage
+pyarrow==14.0.1
+
+# S3 / MinIO client
+boto3==1.34.0
+
+# PostgreSQL driver
+psycopg2-binary==2.9.9
+
+# DataFrame utilities (used by consumer for Parquet conversion)
+pandas==2.1.4
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# dbt (install separately in dbt_project/ if preferred)
+dbt-core==1.7.3
+dbt-postgres==1.7.3

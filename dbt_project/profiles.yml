@@ -1,0 +1,13 @@
+olist_streaming:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('PG_HOST', 'localhost') }}"
+      port: 5432
+      user: postgres
+      password: postgrespassword
+      dbname: olist_warehouse
+      schema: staging
+      threads: 4
+      keepalives_idle: 0

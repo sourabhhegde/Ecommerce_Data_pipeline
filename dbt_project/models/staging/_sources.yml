@@ -1,0 +1,37 @@
+version: 2
+
+sources:
+  - name: raw
+    database: olist_warehouse
+    schema: raw
+    description: "Raw streaming events loaded by the Kafka consumer (consumer.py)"
+
+    tables:
+      - name: orders
+        description: "Order events from the ecommerce.orders Kafka topic"
+        columns:
+          - name: order_id
+            description: "Unique order UUID"
+            tests: [unique, not_null]
+          - name: customer_id
+            tests: [not_null]
+          - name: total_amount
+            tests: [not_null]
+
+      - name: payments
+        description: "Payment events from the ecommerce.payments Kafka topic"
+        columns:
+          - name: payment_id
+            description: "Unique payment UUID"
+            tests: [unique, not_null]
+          - name: order_id
+            tests: [not_null]
+
+      - name: clicks
+        description: "User interaction events from the ecommerce.clicks Kafka topic"
+        columns:
+          - name: click_id
+            description: "Unique click UUID"
+            tests: [unique, not_null]
+          - name: user_id
+            tests: [not_null]

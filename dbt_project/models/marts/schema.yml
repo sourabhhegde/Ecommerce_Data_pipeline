@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: fct_orders
+    description: >
+      Order fact table joined with the most recent payment for each order.
+      Revenue is recognised only when payment_status = 'approved'.
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: revenue
+        description: "Approved payment amount; 0 for pending/declined/refunded"
+
+  - name: fct_revenue_hourly
+    description: "Hourly revenue roll-up by product category"
+    columns:
+      - name: hour
+        tests: [not_null]
+      - name: product_category
+        tests: [not_null]
+
+  - name: dim_products
+    description: >
+      Product dimension enriched with sales metrics (from orders) and
+      engagement metrics (from clicks), including conversion rate.
+    columns:
+      - name: product_id
+        tests: [unique, not_null]
+      - name: conversion_rate_pct
+        description: "unique_buyers / unique_viewers × 100"
+      - name: add_to_cart_rate_pct
+        description: "add_to_cart clicks / total clicks × 100"

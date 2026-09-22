@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: "Cleaned order events — one row per unique order"
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: total_amount
+        tests: [not_null]
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: [created, processing, shipped, delivered, cancelled]
+
+  - name: stg_payments
+    description: "Cleaned payment events — one row per unique payment"
+    columns:
+      - name: payment_id
+        tests: [unique, not_null]
+      - name: payment_status
+        tests:
+          - accepted_values:
+              values: [approved, pending, declined, refunded]
+
+  - name: stg_clicks
+    description: "Cleaned user interaction events — one row per click"
+    columns:
+      - name: click_id
+        tests: [unique, not_null]
+      - name: click_action
+        tests:
+          - accepted_values:
+              values: [view, add_to_cart, remove_from_cart, wishlist, share]

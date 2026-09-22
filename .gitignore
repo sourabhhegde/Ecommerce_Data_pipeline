@@ -1,0 +1,45 @@
+# ============================================================
+# Olist Streaming Pipeline — .gitignore
+# ============================================================
+
+# --- Environment / Secrets (NEVER commit real credentials) ---
+.env
+*.env
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+ENV/
+
+# --- dbt ---
+dbt_project/target/
+dbt_project/logs/
+dbt_project/.user.yml
+dbt_project/dbt_packages/
+
+# --- Data files (raw CSVs, parquet files — too large for git) ---
+data/raw/*.csv
+data/raw/*.parquet
+*.parquet
+*.csv
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Docker volumes / local state ---
+.docker/
